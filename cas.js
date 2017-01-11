@@ -1,23 +1,51 @@
 const cassandra = require('cassandra-driver');
-const client = new cassandra.Client({ contactPoints: ['127.0.0.1'], keyspace: 'test' });
 const uuid = require('node-uuid');
 const _ = require('lodash');
-
+const clientOpts = { 
+    contactPoints: ['127.0.0.1'], 
+    keyspace: 'test',
+    socketOptions: {
+        connectTimeout: 60000,
+        keepAlive: true,
+        readTimeout: 60000
+    } 
+};
+let client;
 exports = module.exports = {
-    result: [],
+    result: {
+        schema: [],
+        insert: []
+    },
+    debug: true,
+    _unique: require('./unique'),
+    unique(name, unique){
+        if(!exports._unique[unique]){
+            exports._unique[unique] = name + (Object.keys(exports._unique).length > 0 ? ('_' + Object.keys(exports._unique).length) : '');
+        }
+        return exports._unique[unique];
+    },
+    saveUnique(){
+        require('fs').writeFileSync('./unique.js', 'module.exports = ' + JSON.stringify(exports._unique, null, '\t'));
+    },
     uuid(){
         return uuid.v4();
     },
+    reset(){
+        exports.result.schema = [];
+        exports.result.insert = [];
+    },
     mapType(vl){
-        if(typeof vl === 'function' && vl.name === 'TYPE') return `frozen<${vl.typeName}>`;
         if(vl instanceof Date) return 'timestamp';
-        if(vl instanceof Array) {
-            if((typeof vl[0] === 'function' && vl[0].name === 'TYPE') || vl instanceof TYPE) return `list<frozen<${vl[0].typeName}>>`;
+        if(vl instanceof Array){
+            if(vl[0] instanceof Array){
+                throw 'Not support array in array';
+            }
             return `list<${exports.mapType(vl[0])}>`;
         }
-        if(typeof vl === 'function' && vl.name === 'TYPE') return `list<frozen<${vl.typeName}>>`;
-        if(typeof vl === 'string') return 'text';
+        if(typeof vl === 'function' && vl.name === 'TYPE') return `frozen<${vl.typeName}>`;
+        if(typeof vl === 'string') return 'varchar';
         if(typeof vl === 'number') return 'int';
+        if(typeof vl === 'boolean') return 'boolean';
         return 'Unknown';
     },
     replaceToKey(key){
@@ -26,156 +54,129 @@ exports = module.exports = {
     replaceToTable(key){
         return key.replace(/[^\w_]/g, '_').replace(/_+/g, '_').toUpperCase();
     },
-    batch(queries){
-        queries = queries.map((e) => {
-            return {
-                query: e,
-                params: []
-            };
-        })
-        return new Promise((resolve, reject) => {
-            client.batch(queries, { prepare: true }, (err, result) => {
-                if(err) return reject(err);
-                resolve(result);
-            }); 
-        });
-    },
-    execute(query){
-        return new Promise((resolve, reject) => {
-            client.execute(query, [], (err, result) => {
-                if(err) return reject(err);
-                resolve(result);
-            }); 
-        });
-    },
-    createTable(tableName){
-        tableName = tableName.toUpperCase();
-        return new Promise((resolve, reject) => {
-            const query = `CREATE TABLE IF NOT EXISTS ${tableName} (id varchar PRIMARY KEY);`;
-            
-            exports.result.push(query);
-            client.execute(query, [], (err, result) => {
-                if(err) return reject(err);
-                resolve(tableName);
-            }); 
-        });        
-    },
-    convertToKeyLower(obj){
-        for(var i in obj){
-            const inew = exports.replaceToKey(i);
-            if(obj[i] instanceof Array){
-                for(var j in obj[i]){
-                    obj[i][j] = exports.convertToKeyLower(obj[i][j]);                    
-                }
-                if( inew !== i){                
-                    obj[exports.replaceToKey(i)] = obj[i];
-                    delete obj[i];
-                }                
-            }else if(typeof obj[i] === 'object'){
-                if( inew !== i){
-                    obj[exports.replaceToKey(i)] = exports.convertToKeyLower(obj[i]);
-                    delete obj[i];
-                }
-            }else {                
-                if( inew !== i){
-                    obj[inew] = _.clone(obj[i]);
-                    delete obj[i];
-                }                
-            }
-        }
-        return obj;
-    },
-    renameAllArray(cols){
+    renameAllArray(cols, key, unique='$root'){
         for(let i in cols){
             const col = cols[i];
             if(col instanceof Array && typeof col[0] === 'object'){
-                cols[i] = 'KEY NA';
+                cols[i] = `#MAP(${exports.unique(key, `${unique}.${i}`)}.${i})`;
             }else if(typeof col === 'object'){
-                cols[i] = exports.renameAllArray(col);
+                cols[i] = exports.renameAllArray(col, i, `${unique}.${i}`);
             }
         }
         return cols;
     },
-    insert(tableName, col){
-        col = exports.convertToKeyLower(col);
+    execute: (q, prms=[]) => {
         return new Promise((resolve, reject) => {
-            const names = [];
-            const values = [];
-            const valuesObj = [];
-            if(!col.id) col.id = exports.uuid();
-            col = exports.renameAllArray(col);
-            for(var k in col){                
-                names.push(`${k.toLowerCase()}`);
-                values.push('?');
-                valuesObj.push(col[k]);
-            }
-            const query = `INSERT INTO ${tableName} (${names.join(', ')}) VALUES (${values.join(', ')});`;
-            
-            exports.result.push(query, JSON.stringify(valuesObj));
-            client.execute(query, valuesObj, { prepare: true }, (err, result) => {
+            client.execute(q, prms, {prepare: true}, (err, rs) => {
                 if(err) return reject(err);
-                resolve(result);
-            }); 
+                resolve(rs);
+            });
+        });
+    },
+    queries(queries){
+        return new Promise(async (resolve, reject) => {                                    
+            try{
+                for(let q of queries){
+                    console.log(`==> ${q}`);
+                    await exports.execute(q);
+                }   
+                resolve('Done');
+            }catch(e){                        
+                reject(e);
+            }
         });        
+    },
+    batch(queries){
+        queries = queries.map((e) => {
+            if(typeof e === 'string'){
+                return {
+                    query: e,
+                    params: []
+                };
+            }else {
+                return {
+                    query: e.query,
+                    params: e.prms
+                };
+            }
+        })
+        return new Promise((resolve, reject) => {
+            client.batch(queries, { prepare: true }, (err, result) => {
+                resolve(result);                   
+            });
+        });
+    },
+    createTable(tableName){
+        // tableName = tableName.toUpperCase();
+        const query = `CREATE TABLE ${tableName} (id varchar PRIMARY KEY);`;            
+        exports.result.schema.push(query);
+        return tableName;
+    },
+    insert(tableName, col){
+        const names = [];
+        const values = [];
+        const valuesObj = [];
+        if(!col.id) col.id = exports.uuid();
+        col = exports.renameAllArray(col, tableName);
+        for(var k in col){                
+            names.push(`${k.toLowerCase()}`);
+            values.push('?');
+            valuesObj.push(col[k]);
+        }
+        const query = `INSERT INTO ${tableName} (${names.join(', ')}) VALUES (${values.join(', ')});`;
+        exports.result.insert.push({query: query, prms: valuesObj});
+        return col.id;    
     },
     addColumn(tableName, name, type){
-        name = name.toLowerCase();
-        return new Promise((resolve, reject) => {
-            const query = `ALTER TABLE ${tableName.toUpperCase()} ADD ${name} ${exports.mapType(type)};`;
-            
-            exports.result.push(query);
-            client.execute(query, [], (err, result) => {
-                if(err) return reject(err);
-                resolve(name);
-            }); 
-        });        
+        // name = name.toLowerCase();
+        if(name !== 'id') {
+            const query = `ALTER TABLE ${tableName.toUpperCase()} ADD ${name} ${exports.mapType(type)};`;            
+            exports.result.schema.push(query);
+        }
+        return name;
     },
     createType(name, col){
-        name = name.toUpperCase();
-        return new Promise((resolve, reject) => {
-            const cols = [];
-            for(var k in col){
-                cols.push(`${k.toLowerCase()} ${exports.mapType(col[k])}`);
-            }
-            const query = `CREATE TYPE ${name} ( ${cols.join(',\n\t')} );`;
-            
-            exports.result.push(query);
-            client.execute(query, [], (err, result) => {
-                if(err) return reject(err);
-                resolve(name);
-            }); 
-        });       
+        // name = name.toUpperCase();
+        const cols = [];
+        for(var k in col){
+            cols.push(`${k.toLowerCase()} ${exports.mapType(col[k])}`);
+        }
+        const query = `CREATE TYPE ${name} ( \n\t${cols.join(',\n\t')} \n);`;        
+        exports.result.schema.push(query);
+        return name;
     },
     appendInColumn(tableName, col){
-        tableName = tableName.toUpperCase();
-        return new Promise((resolve, reject) => {
-            const cols = [];
-            for(var k in col){
-                cols.push(`${k.toLowerCase()} ${exports.mapType(col[k])}`);
-            }
-            const query = `ALTER TABLE ${tableName} ADD (${cols.join(', ')});`;
-            
-            exports.result.push(query);
-            client.execute(query, [], (err, result) => {
-                if(err) return reject(err);
-                resolve(tableName);
-            }); 
-        });           
+        // tableName = tableName.toUpperCase();
+        const cols = [];
+        for(var k in col){
+            if(k === 'id') continue;
+            cols.push(`${k.toLowerCase()} ${exports.mapType(col[k])}`);
+        }
+        const query = `ALTER TABLE ${tableName} ADD (\n\t${cols.join(',\n\t')}\n);`;        
+        exports.result.schema.push(query);
+        return tableName;
     },
     appendInType(typeName, col){
-        typeName = typeName.toUpperCase();
+        // typeName = typeName.toUpperCase();
+        for(var k in col){
+            const query = `ALTER TYPE ${typeName} ADD ${k.toLowerCase()} ${exports.mapType(col[k])};`;
+            exports.result.schema.push(query);
+        }
+        return typeName;
+    }, open(){
         return new Promise((resolve, reject) => {
-            const cols = [];
-            for(var k in col){
-                cols.push(`${k.toLowerCase()} ${exports.mapType(col[k])}`);
-            }
-            const query = `ALTER TYPE ${typeName} ADD (${cols.join(', ')});`;
-            
-            exports.result.push(query);
-            client.execute(query, [], (err, result) => {
+            client = new cassandra.Client(clientOpts);
+            client.connect(async (err) => {
                 if(err) return reject(err);
-                resolve(typeName);
+                resolve('Done');
+            });
+        });
+    }, close(){
+        return new Promise((resolve, reject) => {
+           client.shutdown((err) => {
+                if(err) return reject('ERROR SHUT DOWN');
+                resolve('Done');
             }); 
-        });           
+        });        
     }
 };
