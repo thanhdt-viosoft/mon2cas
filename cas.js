@@ -1,15 +1,8 @@
 const cassandra = require('cassandra-driver');
 const uuid = require('node-uuid');
 const _ = require('lodash');
-const clientOpts = { 
-    contactPoints: ['127.0.0.1'], 
-    keyspace: 'test',
-    socketOptions: {
-        connectTimeout: 60000,
-        keepAlive: true,
-        readTimeout: 60000
-    } 
-};
+const fs = require('fs');
+
 let client;
 exports = module.exports = {
     result: {
@@ -25,7 +18,7 @@ exports = module.exports = {
         return exports._unique[unique];
     },
     saveUnique(){
-        require('fs').writeFileSync('./unique.js', 'module.exports = ' + JSON.stringify(exports._unique, null, '\t'));
+        fs.writeFileSync('./unique.js', 'module.exports = ' + JSON.stringify(exports._unique, null, '\t'));
     },
     uuid(){
         return uuid.v4();
@@ -165,7 +158,7 @@ exports = module.exports = {
         return typeName;
     }, open(){
         return new Promise((resolve, reject) => {
-            client = new cassandra.Client(clientOpts);
+            client = new cassandra.Client(appConfig.cassandra);
             client.connect(async (err) => {
                 if(err) return reject(err);
                 resolve('Done');

@@ -317,11 +317,11 @@ const main = async(sessionId, tbl, cols) => {
     await table.create();
     if(cas.result.schema.length > 0){
         let cnt = [];
-        cnt.push('\n---------D=A=T=A---------\n');
-        cnt.push('USE TEST;');
+        cnt.push('\n---------S=C=H=E=M=A---------\n');
         for(var s of cas.result.schema){
             cnt.push(s);
         }
+        fs.appendFileSync(`./logs/${sessionId}.running.sql`, cnt.join('\n'), 'UTF-8');
         cnt = null;
     }    
     cas.saveUnique();
@@ -333,7 +333,7 @@ const main = async(sessionId, tbl, cols) => {
             cnt.push(s.query);
             cnt.push(JSON.stringify(s.prms, null, '\t'));
         }
-        fs.appendFileSync(`./logs/${sessionId}.query.sql`, cnt.join('\n'), 'UTF-8');
+        fs.appendFileSync(`./logs/${sessionId}.running.sql`, cnt.join('\n'), 'UTF-8');
         cnt = null;
     }    
     if(cas.result.schema.length > 0) {
