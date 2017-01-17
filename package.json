@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node --expose-gc --harmony-async-await index.js"
+    "start": "node --expose-gc --harmony-async-await index.js",
+    "all": "node --expose-gc --harmony-async-await index.js full"
   },
   "author": "",
   "license": "ISC",
