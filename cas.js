@@ -11,7 +11,8 @@ exports = module.exports = {
     },
     debug: true,
     _unique: require('./unique'),
-    unique(name, unique){
+    unique(name0, unique){
+        let name = name0.replace(/^[0-9]+/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_/g, '').replace(/_$/g, '');
         if(!exports._unique[unique]){
             exports._unique[unique] = name + (Object.keys(exports._unique).length > 0 ? ('_' + Object.keys(exports._unique).length) : '');
         }

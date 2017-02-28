@@ -33,7 +33,7 @@ let main = async (oldSessionId) => {
         if(isFullSync && !oldSessionId) {
             await collection.updateMany({}, {$set: {synced: null}});
         }
-        const rs = await collection.find(appConfig.table.query).limit(appConfig.table.limit).toArray();
+        let rs = await collection.find(appConfig.table.query).limit(appConfig.table.limit).toArray();
         await cas.open();
         let isReplay = rs.length === appConfig.table.limit;
         let numPassed = 0;
@@ -41,7 +41,7 @@ let main = async (oldSessionId) => {
             const item = convertObjectIdToString(_.cloneDeep(rs[i]));
             try {
                 if(typeof item.result === 'string') item.result = JSON.parse(item.result);
-                await cassandraService(sessionId, appConfig.table.name, item);
+                await cassandraService(sessionId, appConfig.table.name, item.result);
                 console.log('.');
                 try{
                     await collection.update({ _id: rs[i]._id }, { $set: { synced: sessionId } });

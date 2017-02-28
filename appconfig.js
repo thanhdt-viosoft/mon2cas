@@ -5,7 +5,9 @@ module.exports = {
     table: {
         name: 'ExecutingLogs',
         query: {
-            event_type: 5, // RUN TESTCASE
+            event_type: {
+                $in: [5, 6]
+            }, // RUN TESTCASE
             status: 1, // PASSED
             $or: [
                 {synced: { $exists: false }},

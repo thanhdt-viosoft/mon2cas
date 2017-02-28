@@ -227,7 +227,7 @@ global.Table = class Table extends AbsCasObj {
             this.id = cas.insert(this.name, this.values[i]);
             for(var key in this.column){
                 const col = this.column[key];
-                if(col instanceof Table){
+                if(col instanceof Table) { 
                     const rs = col.insert(this.id);
                 }else if(col instanceof Type){
                     const rs = col.insert(this.id);
